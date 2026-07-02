@@ -1,0 +1,16 @@
+{
+  "name": "ecommerce-api",
+  "version": "1.0.0",
+  "description": "Express.js e-commerce backend API with sql.js",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "sql.js": "^1.11.0"
+  }
+}
