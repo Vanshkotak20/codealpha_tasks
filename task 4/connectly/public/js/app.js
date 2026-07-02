@@ -207,6 +207,7 @@ async function joinRoom(roomId, password) {
 
     applyPermissions();
     updateParticipantsList(participants);
+    wbHistory = whiteboard;
     whiteboard.forEach(d => drawFromData(d));
     chat.forEach(msg => appendChatMessage(msg));
     files.forEach(f => appendFile(f));
@@ -247,8 +248,8 @@ async function joinRoom(roomId, password) {
     }
   });
 
-  socket.on('whiteboard-draw', (data) => { drawFromData(data); });
-  socket.on('whiteboard-clear', () => { clearCanvas(); });
+  socket.on('whiteboard-draw', (data) => { wbHistory.push(data); drawFromData(data); });
+  socket.on('whiteboard-clear', () => { wbHistory = []; clearCanvas(); });
   socket.on('file-shared', (fileData) => { appendFile(fileData); toast(fileData.sharedBy.name + ' shared: ' + fileData.originalname, 'info'); });
   socket.on('screen-share-started', ({ user }) => { toast((user ? user.name : 'Someone') + ' started screen sharing', 'info'); });
   socket.on('screen-share-stopped', () => { toast('Screen sharing stopped', 'info'); });
@@ -317,7 +318,17 @@ function createPeer(socketId, user) {
   pc.ontrack = ({ streams }) => {
     if (streams[0]) {
       const existing = document.getElementById('video-' + socketId);
-      if (existing) { const v = existing.querySelector('video'); if (v) v.srcObject = streams[0]; }
+      if (existing) {
+        let v = existing.querySelector('video');
+        if (!v) {
+          v = document.createElement('video');
+          v.autoplay = true; v.playsInline = true;
+          existing.insertBefore(v, existing.querySelector('.tile-label'));
+          const av = existing.querySelector('.tile-avatar');
+          if (av) av.remove();
+        }
+        v.srcObject = streams[0];
+      }
       else if (user) addVideoTile(socketId, user, streams[0], false);
     }
   };
@@ -328,7 +339,7 @@ function createPeer(socketId, user) {
 
 async function createOffer(socketId) {
   const pc = createPeer(socketId, participants[socketId]);
-  const offer = await pc.createOffer();
+  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
   await pc.setLocalDescription(offer);
   socket.emit('offer', { to: socketId, offer });
 }
@@ -579,6 +590,7 @@ function appendFile(fileData) {
 // ─── WHITEBOARD ───
 let wbCanvas, wbCtx, wbDrawing = false, wbTool = 'pen', wbStartX, wbStartY;
 let wbColor = '#6366f1', wbSize = 4, wbSnapshot = null;
+let wbHistory = [];
 
 function setupWhiteboard() {
   wbCanvas = document.getElementById('whiteboard-canvas');
@@ -599,6 +611,7 @@ function setupWhiteboard() {
   });
 
   document.getElementById('wb-clear').addEventListener('click', () => {
+    wbHistory = [];
     clearCanvas();
     if (socket) socket.emit('whiteboard-clear', { roomId: currentRoom.id });
   });
@@ -635,7 +648,11 @@ function setupWhiteboard() {
       wbCtx.fillStyle = wbColor;
       wbCtx.font = (wbSize * 4 + 12) + 'px Inter, sans-serif';
       wbCtx.fillText(text, textInputPos.x, textInputPos.y);
-      if (socket) socket.emit('whiteboard-draw', { roomId: currentRoom.id, data: { type: 'text', x: textInputPos.x, y: textInputPos.y, text, color: wbColor, size: wbSize } });
+      if (socket) {
+        const data = { type: 'text', x: textInputPos.x, y: textInputPos.y, text, color: wbColor, size: wbSize };
+        wbHistory.push(data);
+        socket.emit('whiteboard-draw', { roomId: currentRoom.id, data });
+      }
     }
     textInput.style.display = 'none';
   };
@@ -644,12 +661,11 @@ function setupWhiteboard() {
 }
 
 function resizeCanvas() {
-  const saved = wbCanvas.toDataURL();
+  if (wbCanvas.offsetWidth === 0 || wbCanvas.offsetHeight === 0) return;
   wbCanvas.width = wbCanvas.offsetWidth;
   wbCanvas.height = wbCanvas.offsetHeight;
-  const img = new Image();
-  img.onload = () => wbCtx.drawImage(img, 0, 0);
-  img.src = saved;
+  clearCanvas();
+  wbHistory.forEach(d => drawFromData(d));
 }
 
 function getPos(e) {
@@ -672,11 +688,19 @@ function continueDraw(e) {
   if (wbTool === 'pen') {
     wbCtx.strokeStyle = wbColor; wbCtx.lineWidth = wbSize; wbCtx.lineCap = 'round'; wbCtx.lineJoin = 'round';
     wbCtx.lineTo(p.x, p.y); wbCtx.stroke();
-    if (socket) socket.emit('whiteboard-draw', { roomId: currentRoom.id, data: { type: 'line-segment', x1: wbStartX, y1: wbStartY, x2: p.x, y2: p.y, color: wbColor, size: wbSize } });
+    if (socket) {
+      const data = { type: 'line-segment', x1: wbStartX, y1: wbStartY, x2: p.x, y2: p.y, color: wbColor, size: wbSize };
+      wbHistory.push(data);
+      socket.emit('whiteboard-draw', { roomId: currentRoom.id, data });
+    }
     wbStartX = p.x; wbStartY = p.y;
   } else if (wbTool === 'eraser') {
     wbCtx.clearRect(p.x - wbSize * 3, p.y - wbSize * 3, wbSize * 6, wbSize * 6);
-    if (socket) socket.emit('whiteboard-draw', { roomId: currentRoom.id, data: { type: 'eraser', x: p.x, y: p.y, size: wbSize } });
+    if (socket) {
+      const data = { type: 'eraser', x: p.x, y: p.y, size: wbSize };
+      wbHistory.push(data);
+      socket.emit('whiteboard-draw', { roomId: currentRoom.id, data });
+    }
   } else {
     wbCtx.putImageData(wbSnapshot, 0, 0);
     wbCtx.strokeStyle = wbColor; wbCtx.lineWidth = wbSize; wbCtx.beginPath();
@@ -691,7 +715,11 @@ function endDraw(e) {
   wbDrawing = false;
   if (['line', 'rect', 'circle'].includes(wbTool) && e && e.type !== 'touchend') {
     const p = e.type === 'mouseleave' ? { x: wbStartX, y: wbStartY } : getPos(e);
-    if (socket) socket.emit('whiteboard-draw', { roomId: currentRoom.id, data: { type: wbTool, x1: wbStartX, y1: wbStartY, x2: p.x, y2: p.y, color: wbColor, size: wbSize } });
+    if (socket) {
+      const data = { type: wbTool, x1: wbStartX, y1: wbStartY, x2: p.x, y2: p.y, color: wbColor, size: wbSize };
+      wbHistory.push(data);
+      socket.emit('whiteboard-draw', { roomId: currentRoom.id, data });
+    }
   }
 }
 
