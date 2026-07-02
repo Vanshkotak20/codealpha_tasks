@@ -217,7 +217,6 @@ async function joinRoom(roomId, password) {
   socket.on('user-joined', (participant) => {
     toast(participant.name + ' joined', 'info');
     addParticipant(participant);
-    setTimeout(() => createOffer(participant.socketId), 500);
   });
 
   socket.on('user-left', ({ socketId }) => {
