@@ -834,3 +834,21 @@ input[type="color"] { width: 36px; height: 36px; border: 1px solid var(--border)
 
 @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes fadeOut { to { transform: translateX(100%); opacity: 0; } }
+
+/* ─── MOBILE RESPONSIVE ─── */
+@media (max-width: 768px) {
+  .dashboard-cards { grid-template-columns: 1fr; }
+  .videos-grid.count-2, .videos-grid.count-3, .videos-grid.count-4, .videos-grid.count-many {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto;
+  }
+  .room-topbar { flex-direction: column; gap: 0.5rem; padding: 0.5rem; height: auto; }
+  .room-info { margin-bottom: 0.5rem; text-align: center; justify-content: center; width: 100%; flex-wrap: wrap; }
+  .room-controls-top { flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .wb-tools { justify-content: center; width: 100%; margin-bottom: 0.5rem; }
+  .wb-settings { justify-content: center; width: 100%; flex-wrap: wrap; }
+  .whiteboard-toolbar { padding: 0.5rem; flex-direction: column; }
+  .navbar { padding: 1rem; flex-direction: column; gap: 1rem; }
+  .nav-brand { justify-content: center; width: 100%; }
+  .nav-actions { justify-content: center; width: 100%; flex-wrap: wrap; }
+}

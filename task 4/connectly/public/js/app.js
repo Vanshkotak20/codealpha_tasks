@@ -228,15 +228,37 @@ async function joinRoom(roomId, password) {
   });
 
   socket.on('offer', async ({ from, offer, user }) => {
-    const pc = createPeer(from, user);
+    let pc = peers[from];
+    if (!pc) pc = createPeer(from, user);
     await pc.setRemoteDescription(offer);
+    if (candidateQueue[from]) {
+      for (const c of candidateQueue[from]) { try { await pc.addIceCandidate(c); } catch (e) {} }
+      delete candidateQueue[from];
+    }
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     socket.emit('answer', { to: from, answer });
   });
 
-  socket.on('answer', async ({ from, answer }) => { if (peers[from]) await peers[from].setRemoteDescription(answer); });
-  socket.on('ice-candidate', async ({ from, candidate }) => { if (peers[from] && candidate) { try { await peers[from].addIceCandidate(candidate); } catch (e) {} } });
+  socket.on('answer', async ({ from, answer }) => { 
+    if (peers[from]) {
+      await peers[from].setRemoteDescription(answer);
+      if (candidateQueue[from]) {
+        for (const c of candidateQueue[from]) { try { await peers[from].addIceCandidate(c); } catch (e) {} }
+        delete candidateQueue[from];
+      }
+    }
+  });
+  socket.on('ice-candidate', async ({ from, candidate }) => { 
+    if (peers[from] && candidate) { 
+      if (!peers[from].remoteDescription || !peers[from].remoteDescription.type) {
+        if (!candidateQueue[from]) candidateQueue[from] = [];
+        candidateQueue[from].push(candidate);
+      } else {
+        try { await peers[from].addIceCandidate(candidate); } catch (e) {} 
+      }
+    } 
+  });
 
   socket.on('chat-message', (msg) => {
     appendChatMessage(msg);
@@ -422,7 +444,18 @@ function setupRoomControls() {
       isSharingScreen = true;
       document.getElementById('btn-screen').classList.add('active');
       const screenTrack = screenStream.getVideoTracks()[0];
-      Object.values(peers).forEach(pc => { const s = pc.getSenders().find(s => s.track && s.track.kind === 'video'); if (s) s.replaceTrack(screenTrack); });
+      Object.values(peers).forEach(async pc => { 
+        const s = pc.getSenders().find(s => s.track && s.track.kind === 'video'); 
+        if (s) {
+          s.replaceTrack(screenTrack); 
+        } else {
+          pc.addTrack(screenTrack, screenStream);
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          const socketId = Object.keys(peers).find(k => peers[k] === pc);
+          if (socketId) socket.emit('offer', { to: socketId, offer });
+        }
+      });
       const tile = document.getElementById('video-local');
       if (tile) { let v = tile.querySelector('video'); if (!v) { v = document.createElement('video'); v.autoplay = true; v.playsInline = true; v.muted = true; tile.insertBefore(v, tile.querySelector('.tile-label')); } v.srcObject = screenStream; v.style.display = ''; const av = tile.querySelector('.tile-avatar'); if (av) av.remove(); }
       socket.emit('screen-share-started', { roomId: currentRoom.id });
@@ -746,7 +779,7 @@ function cleanup() {
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
   Object.values(peers).forEach(pc => pc.close());
-  peers = {}; participants = {}; currentRoom = null;
+  peers = {}; candidateQueue = {}; participants = {}; currentRoom = null;
   isSharingScreen = false; isVideoOn = true; isAudioOn = true; unreadChat = 0;
   document.getElementById('videos-grid').innerHTML = '';
   document.getElementById('chat-messages').innerHTML = '';
